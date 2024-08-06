@@ -12,52 +12,58 @@
 #define NUM_TRAINS 5
 #define MAX_STATIONS 8
 #define MAX_ROUTE_LENGTH 10
-#define MAX_MESSAGE_TEXT 10
+#define MAX_MESSAGE_TEXT 100
+
+#define MESSAGE_QUEUE 1234
 
 // Shared memory structure
 typedef struct {
   char segments[NUM_SEGMENTS];
 } SharedMemory;
 
+// helper struct to generate the SharedMemory
+typedef struct TrainSM {
+    SharedMemory *shm;
+    int shmid;
+} TrainSM;
+
 // Train Journey struct
 typedef struct TrainJourney {
-    int train_id;
-    int num_segements;
-    char** itinerary;
+  int train_id;
+  char *itinerary;
 } TrainJourney;
 
-// enum for actions
-typedef enum MessageActions {
-    GetNext,
-    IsResponse,
-    Exit,
-} MessageActions;
+// helper struct to generate Journey SharedMemory
+typedef struct FileMapSM {
+    TrainJourney *tj;
+    int shmid;
+} FileMapSM;
 
 // Structure for message passing
 typedef struct {
-    long msg_type;
-    char train_id;
-    MessageActions msg_action;
-    // refactor to msg_text
-    char msg_text[MAX_MESSAGE_TEXT];
+  long msg_type;
+  char train_id;
+  char msg_text[MAX_MESSAGE_TEXT];
 } Message;
 
 // Function prototypes
-void run(char *filename);
-
 // CONTROLLER
-void controller_start(SharedMemory *shm, char *filename, int shmid);
-void create_journey_process(char* filename, int msgid);
-void create_train_processes(SharedMemory *shm, int msgid);
+void run(char *filename);
+TrainSM create_share_memory();
+FileMapSM create_shared_map();
 void wait_for_all_trains();
-void cleanup();
+void cleanup(TrainSM tshm);
+int create_message_queue();
 
 // JOURNEY
-void load_maps_from_file(char* filename);
-void wait_for_route_request();
-void send_route_to_train();
+void create_journey_process(char *filename, FileMapSM fmshm);
+void journey_process(char *filename, FileMapSM fmshm);
+void receive_journey();
+void send_journey();
 
 // TRAIN_THR
+void create_train_processes(TrainSM tshm, FileMapSM fmshm);
+void train_process(SharedMemory *shm, FileMapSM fmshm, int train_num);
 /*
         route = request_route_from_journey()
         for segment in route:

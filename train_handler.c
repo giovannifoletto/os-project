@@ -1,4 +1,5 @@
 #include "train_handler.h"
+#include <complex.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,6 +12,27 @@
 #include <unistd.h>
 
 void run(char *filename) {
+  // setup memory and channels
+  TrainSM tshm = create_share_memory();
+  FileMapSM fmshm = create_shared_map();
+
+  // Create JOURNEY process
+  create_journey_process(filename, fmshm);
+
+  // Create TRAIN_THR processes
+  create_train_processes(tshm, fmshm);
+
+  // finish and cleanup
+  wait_for_all_trains();
+  cleanup(tshm);
+
+  printf("All trains have reached their destinations and memory freed. Program "
+         "complete.\n");
+}
+
+TrainSM create_share_memory() {
+  TrainSM ntshm;
+
   // Create and attach shared memory
   int shmid = shmget(IPC_PRIVATE, sizeof(SharedMemory), IPC_CREAT | 0666);
   if (shmid == -1) {
@@ -23,48 +45,49 @@ void run(char *filename) {
     perror("shmat failed");
     exit(1);
   }
-
-  // initialize Controller
-  // =====================
-  controller_start(shm, filename, shmid);
-}
-
-void controller_start(SharedMemory *shm, char *filename, int shmid) {
-
   // Initialize shared memory
   memset(shm->segments, '0', NUM_SEGMENTS);
-  // create channels for message passing for the journey
-  int msgid = msgget(IPC_PRIVATE, 0666 | IPC_CREAT);
-  if (msgid == -1) {
-    perror("msgget for Journey failed");
-    exit(1);
-  }
+  ntshm.shmid = shmid;
+  ntshm.shm = shm;
 
-  // Create JOURNEY process
-  create_journey_process(filename, msgid);
-
-  // Create TRAIN_THR processes
-  create_train_processes(shm, msgid);
-
-  // Wait for all child processes to complete
-  wait_for_all_trains();
-
-  // Clean up shared memory
-  shmdt(shm);
-  shmctl(shmid, IPC_RMID, NULL);
-
-  printf("All trains have reached their destinations. Program complete.\n");
+  return ntshm;
 }
 
-void create_journey_process(char *filename, int msgid) {
+void create_journey_process(char *filename, FileMapSM fmshm) {
   // the journey controller has its own process.
   pid_t pid = fork();
-  if (pid < 0) {
+  if (pid == 0) {
+    journey_process(filename, fmshm);
+  } else if (pid < 0) {
     perror("Fork failed for Journey process");
     exit(1);
   }
+}
 
-  printf("Entering Journey dispatcher");
+FileMapSM create_shared_map() {
+  FileMapSM fmshm;
+
+  // Create and attach shared memory
+  int shmid = shmget(IPC_PRIVATE, sizeof(TrainJourney)*NUM_TRAINS, IPC_CREAT | 0666);
+  if (shmid == -1) {
+    perror("shmget failed");
+    exit(1);
+  }
+
+  TrainJourney *shm = (TrainJourney *)shmat(shmid, NULL, 0);
+  if (shm == (void *)-1) {
+    perror("shmat failed");
+    exit(1);
+  }
+
+  fmshm.shmid = shmid;
+  fmshm.tj = shm;
+
+  return fmshm;
+}
+
+void journey_process(char *filename, FileMapSM fmshm) {
+  printf("Journey Dispatcher created with Process ID: {%d}\n", getpid());
 
   FILE *file = fopen(filename, "r");
   if (file == NULL) {
@@ -82,106 +105,98 @@ void create_journey_process(char *filename, int msgid) {
       exit(1);
     }
 
-    // create a backup line copy to work with
-    char *line_copy = strdup(line);
-    if (!line_copy) {
-      perror("Failed to allocate memory for line_copy string");
-      exit(1);
+    // change end of line char
+    char *current_pos = strchr(line, '\n');
+    if (current_pos) {
+      *current_pos = '\0';
     }
-    // initialize the train_id field
-    trains[train_idx].train_id = atoi(&line[1]);
 
-    // splitting whole string over spaces
-    char *token = strtok(line, " ");
-    char **result = NULL;
-    int size = 0;
-
-    while (token != NULL) {
-      char **temp = realloc(result, sizeof(char *) * (size + 1));
-      if (!temp) {
-        // failed to realloc
-        free(result);
-        free(line_copy);
-        perror("Failed to realloc [create_journey_process]");
-        exit(1);
-      }
-      result = temp;
-
-      result[size] = strdup(token);
-      if (!result[size]) {
-        // failed to strdup
-        for (int i = 0; i < size; i++) {
-          free(result[i]);
-        }
-        free(result);
-        free(line_copy);
-        perror("Failed to strdup");
-        exit(1);
-      }
-      size++;
-      token = strtok(NULL, " ");
-    } // end while splitting section
-    free(line_copy);
-    trains[train_idx].itinerary = result;
-    trains[train_idx].num_segements = size;
+    trains[train_idx].itinerary = line;
   } // end getline
-  fprintf(stdout, "Finished importing map file");
+  printf("Finished importing map file\n");
   fclose(file);
 
+  memcpy(fmshm.tj, trains, sizeof(TrainJourney)*NUM_TRAINS);
+  perror("Create Journey memcpy");
   // wait for received messages
   // msg_type = 0 => send
   // msg_type = 1 => recv
-  while (TRUE) {
+  /*printf("Starting opening channels\n");
+  int curr_sending = NUM_TRAINS - 1;
+  while (curr_sending != 0) {
     Message req;
     Message rsp;
-
     // Wait until a request come's in
-    msgrcv(msgid, &req, sizeof(req) - sizeof(long), 0, 0);
+    msgrcv(msgid, &req, sizeof(req) - sizeof(long), curr_sending, 0);
+    perror("Journey msgrcv");
+
     printf("Message received from train {%d}\n", req.train_id);
 
-    // if it is not for us, we skip
-    if (req.msg_type == 0) {
-      continue;
-    }
+    // Setup response message
+    rsp.train_id = req.train_id;
+    rsp.msg_type = curr_sending;
+    int tid = atoi(&req.train_id);
 
-    if (req.msg_action == Exit) {
-      break;
-    }
-    if (req.msg_action == GetNext) {
-      // train number
-      int tn = req.train_id;
-      // train current position
-      char *tcp = malloc(sizeof(char) * MAX_MESSAGE_TEXT);
-      strcpy(tcp, req.msg_text);
-      int iter = 0;
-      int not_current = TRUE;
-      // find the current
-      while (not_current && trains[tn].num_segements < iter) {
-        if (strcmp(trains[tn].itinerary[iter], tcp)) {
-          not_current = FALSE;
-        }
-        iter++;
-      }
-      // get the next
-
-      char *next_hop = trains[tn].itinerary[iter + 1];
-
-      // Setup response message
-      rsp.msg_action = IsResponse;
-      rsp.train_id = tn;
-      rsp.msg_type = 1;
-      strcpy(rsp.msg_text, next_hop);
-
-      strncpy(rsp.msg_text, next_hop, sizeof(rsp.msg_text));
-      snprintf(rsp.msg_text, sizeof(rsp.msg_text), "%s", next_hop);
-      msgsnd(msgid, &rsp, sizeof(rsp) - sizeof(long), 0);
-    }
-  }
-
-  printf("Journey dispatcher exiting");
+    strncpy(rsp.msg_text, trains[tid].itinerary, sizeof(rsp.msg_text));
+    // perror("Journey strncpy");
+    snprintf(rsp.msg_text, sizeof(rsp.msg_text), "%s", trains[tid].itinerary);
+    // perror("Journey snprintf");
+    msgsnd(msgid, &rsp, sizeof(rsp) - sizeof(long), req.msg_type);
+    perror("Journey msgsnd");
+    curr_sending--;
+  }*/
+  printf("Journey dispatcher exiting\n");
   exit(0);
 }
 
+void create_train_processes(TrainSM tshm, FileMapSM fmshm) {
+  for (int i = 0; i < NUM_TRAINS; i++) {
+    pid_t pid = fork();
+    if (pid == 0) {
+      train_process(tshm.shm, fmshm, i);
+    } else if (pid < 0) {
+      perror("Fork failed for create_train_processes process");
+      exit(1);
+    }
+  }
+}
+
+void train_process(SharedMemory *shm, FileMapSM fmshm, int train_num) {
+  printf("Train Process id: {%d} - pid: {%d}\n", train_num, getpid());
+
+  char* itinerary = malloc(sizeof(char)*MAX_CHAR_LEN);
+  strcpy(itinerary, fmshm.tj[train_num].itinerary);
+  printf("Itinerary received: {%s}", itinerary);
+  /*char *itinerary = NULL;
+  int is_empty = TRUE;
+  while (is_empty) {
+    Message req;
+    Message rsp;
+
+    req.msg_type = train_num; // Message type for requests
+    req.train_id = train_num;
+    itinerary = realloc(itinerary, sizeof(char) * sizeof(req.msg_text));
+    strncpy(req.msg_text, itinerary, sizeof(req.msg_text));
+    snprintf(req.msg_text, sizeof(req.msg_text), "%s", itinerary);
+    msgsnd(msgid, &req, sizeof(req) - sizeof(long), train_num);
+    perror("Train msgsnd");
+    msgrcv(msgid, &rsp, sizeof(rsp) - sizeof(long), train_num, 0);
+    perror("Train msgrcv");
+
+    if (rsp.train_id != train_num) {
+      continue;
+    }
+
+    if (strcmp(rsp.msg_text, "") != 0) {
+      is_empty = FALSE;
+    }
+
+    printf("Next hop for train {%d} is: {%s}\n", train_num, rsp.msg_text);
+  }*/
+  exit(0);
+}
+
+// === UTILITIES ===
 void log_journey(char *train_id, char *current, char *next) {
   FILE *log_file;
   char filename[10];
@@ -197,43 +212,6 @@ void log_journey(char *train_id, char *current, char *next) {
   }
 }
 
-void create_train_processes(SharedMemory *shm, int msgid) {
-  for (int i = 0; i < NUM_TRAINS; i++) {
-    pid_t pid = fork();
-    if (pid < 0) {
-      perror("Fork failed for TRAIN_THR process");
-      exit(1);
-    }
-    printf("Process id: {%d}\n", pid);
-    int what_train_i_am = i;
-    char *current_segment = "";
-    char next_segment[10] = "NEXT";
-
-    while (TRUE) {
-      Message req;
-      Message rsp;
-      // if a station is returned, then I am arrived
-      if (current_segment[0] == 'S') {
-        break;
-      }
-
-      // request next_hop
-      req.msg_type = 1; // Message type for requests
-      req.train_id = what_train_i_am;
-      strncpy(req.msg_text, next_segment, sizeof(req.msg_text));
-      snprintf(req.msg_text, sizeof(req.msg_text), "%s", next_segment);
-      msgsnd(msgid, &req, sizeof(req) - sizeof(long), 0);
-
-      msgrcv(msgid, &rsp, sizeof(rsp) - sizeof(long), 0, 0);
-      if (rsp.train_id != what_train_i_am) {
-        continue;
-      }
-      printf("Next hop for train {%d} is: {%s}", what_train_i_am, rsp.msg_text);
-    }
-    exit(0);
-  }
-}
-
 void wait_for_all_trains() {
   int status;
   pid_t pid;
@@ -246,3 +224,69 @@ void wait_for_all_trains() {
     }
   }
 }
+
+void cleanup(TrainSM tshm) {
+  shmdt(tshm.shm);
+  perror("Clean shared memory returned");
+  shmctl(tshm.shmid, IPC_RMID, NULL);
+  perror("Clean shared memory ID returned");
+}
+
+int create_message_queue() {
+  // create channels for message passing for the journey
+  int msgid = msgget(IPC_PRIVATE, 0666 | IPC_CREAT);
+  if (msgid == -1) {
+    perror("msgget failed");
+    exit(1);
+  }
+
+  return msgid;
+}
+
+/*
+char **import_whitespace_divided_journey() {
+
+  // create a backup line copy to work with
+  char *line_copy = strdup(line);
+  if (!line_copy) {
+    perror("Failed to allocate memory for line_copy string");
+    exit(1);
+  }
+  // initialize the train_id field
+  trains[train_idx].train_id = atoi(&line[1]);
+
+  // splitting whole string over spaces
+  char *token = strtok(line, " ");
+  char **result = NULL;
+  int size = 0;
+
+  while (token != NULL) {
+    char **temp = realloc(result, sizeof(char *) * (size + 1));
+    if (!temp) {
+      // failed to realloc
+      free(result);
+      free(line_copy);
+      perror("Failed to realloc [create_journey_process]");
+      exit(1);
+    }
+    result = temp;
+
+    result[size] = strdup(token);
+    if (!result[size]) {
+      // failed to strdup
+      for (int i = 0; i < size; i++) {
+        free(result[i]);
+      }
+      free(result);
+      free(line_copy);
+      perror("Failed to strdup");
+      exit(1);
+    }
+    size++;
+    token = strtok(NULL, " ");
+  } // end while splitting section
+  free(line_copy);
+  trains[train_idx].itinerary = result;
+  trains[train_idx].num_segements = size;
+}
+*/
