@@ -1,5 +1,4 @@
 // #include "journey.h"
-#include "journey.h"
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,6 +14,9 @@ char track_segments[NUM_SEGMENTS];
 
 // Mutex for each track segment
 pthread_mutex_t track_mutex[NUM_SEGMENTS];
+
+// Barrier to synchronize train start
+pthread_barrier_t train_barrier;
 
 // Train data structure
 typedef struct {
@@ -49,7 +51,7 @@ void load_routes(Train *trains) {
 
       if (token[0] == 'M' && token[1] == 'A') {
         // Convert "MAx" to segment index
-        trains[train_index].route[segment_index++] = atoi(&token[2]);
+        trains[train_index].route[segment_index++] = atoi(token + 2);
       }
       token = strtok(NULL, " ");
     }
@@ -66,6 +68,11 @@ void load_routes(Train *trains) {
 void *train_journey(void *arg) {
   Train *train = (Train *)arg;
   int train_id = train->train_id;
+
+  printf("Train %d prepared to be sync.\n", train_id);
+
+  // Synchronize all trains before departure
+  pthread_barrier_wait(&train_barrier);
 
   printf("Train %d started its journey.\n", train_id);
 
@@ -91,7 +98,12 @@ void *train_journey(void *arg) {
   pthread_exit(NULL);
 }
 
-int main() {
+int main(int argc, char *argv[]) {
+  if (argc < 2) {
+    fprintf(stderr, "Usage: %s <MAP file>\n", argv[0]);
+    return 1;
+  }
+
   pthread_t trains[NUM_TRAINS];
   Train *train_data = (Train *)malloc((sizeof(Train) * NUM_TRAINS));
 
@@ -104,15 +116,17 @@ int main() {
     }
   }
 
+  if (pthread_barrier_init(&train_barrier, NULL, NUM_TRAINS) != 0) {
+    perror("Error while pthread_mutex_init: line 63\n");
+    return 1;
+  }
+
   load_routes(train_data);
 
   printf("Controller: Tracks initialized.\n");
 
   // Create train threads
   for (int i = 0; i < NUM_TRAINS; i++) {
-    Train *train = malloc(sizeof(Train));
-    train->train_id = i + 1;
-
     if (pthread_create(&trains[i], NULL, train_journey, &train_data[i]) != 0) {
       perror("Failed to create train thread");
       return 1;
@@ -130,6 +144,9 @@ int main() {
   for (int i = 0; i < NUM_SEGMENTS; i++) {
     pthread_mutex_destroy(&track_mutex[i]);
   }
+
+  // Destroy barrier
+  pthread_barrier_destroy(&train_barrier);
 
   free(train_data);
 
