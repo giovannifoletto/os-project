@@ -24,6 +24,7 @@ typedef struct {
   int route[MAX_ROUTE];
   int route_length;
   int start;
+  int destination;
 } Train;
 
 // Load routes from MAP1.txt
@@ -45,13 +46,16 @@ void load_routes(Train *trains) {
 
     while (token && segment_index < MAX_ROUTE) {
       if (token[0] == 'S') {
-        // && token[3] == S (this will go in error on normal cases)
-        trains[train_index].start = atoi(&token[1]);
+        if (segment_index == 0) {
+          trains[train_index].start = atoi(&token[1]);
+        } else {
+          trains[train_index].destination = atoi(&token[1]);
+        }
       }
 
       if (token[0] == 'M' && token[1] == 'A') {
         // Convert "MAx" to segment index
-        trains[train_index].route[segment_index++] = atoi(token + 2);
+        trains[train_index].route[segment_index++] = atoi(&token[2]);
       }
       token = strtok(NULL, " ");
     }
@@ -69,12 +73,14 @@ void *train_journey(void *arg) {
   Train *train = (Train *)arg;
   int train_id = train->train_id;
 
-  printf("Train %d prepared to be sync.\n", train_id);
+  printf("Train %d prepared to be sync at station S%d.\n", train_id,
+         train->start);
 
   // Synchronize all trains before departure
   pthread_barrier_wait(&train_barrier);
 
-  printf("Train %d started its journey.\n", train_id);
+  printf("Train %d started its journey from station S%d.\n", train_id,
+         train->start);
 
   for (int i = 0; i < train->route_length; i++) {
     int segment = train->route[i];
@@ -94,7 +100,8 @@ void *train_journey(void *arg) {
     printf("Train %d left segment %d.\n", train_id, segment + 1);
   }
 
-  printf("Train %d reached destination.\n", train_id);
+  printf("Train %d reached destination station S%d.\n", train_id,
+         train->destination);
   pthread_exit(NULL);
 }
 
