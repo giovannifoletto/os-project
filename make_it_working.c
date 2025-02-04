@@ -1,3 +1,5 @@
+// #include "journey.h"
+#include "journey.h"
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -6,6 +8,7 @@
 
 #define NUM_SEGMENTS 16
 #define NUM_TRAINS 5
+#define MAX_ROUTE 10
 
 // Shared track segments
 char track_segments[NUM_SEGMENTS];
@@ -16,7 +19,48 @@ pthread_mutex_t track_mutex[NUM_SEGMENTS];
 // Train data structure
 typedef struct {
   int train_id;
+  int route[MAX_ROUTE];
+  int route_length;
+  int start;
 } Train;
+
+// Load routes from MAP1.txt
+void load_routes(Train *trains) {
+  FILE *file = fopen("MAP1.txt", "r");
+  if (!file) {
+    perror("Failed to open MAP1.txt");
+    exit(1);
+  }
+
+  char line[200];
+  int train_index = 0;
+
+  while (fgets(line, sizeof(line), file) != 0 && train_index < NUM_TRAINS) {
+    trains[train_index].train_id = train_index + 1;
+
+    char *token = strtok(line, " ");
+    int segment_index = 0;
+
+    while (token && segment_index < MAX_ROUTE) {
+      if (token[0] == 'S') {
+        // && token[3] == S (this will go in error on normal cases)
+        trains[train_index].start = atoi(&token[1]);
+      }
+
+      if (token[0] == 'M' && token[1] == 'A') {
+        // Convert "MAx" to segment index
+        trains[train_index].route[segment_index++] = atoi(&token[2]);
+      }
+      token = strtok(NULL, " ");
+    }
+
+    trains[train_index].route_length = segment_index;
+    train_index++;
+    segment_index = 0;
+  }
+
+  fclose(file);
+}
 
 // Simulates train journey
 void *train_journey(void *arg) {
@@ -25,45 +69,42 @@ void *train_journey(void *arg) {
 
   printf("Train %d started its journey.\n", train_id);
 
-  // Example journey (this should come from MAP1 or MAP2)
-  int route[] = {0, 1, 2, 3, 8}; // Sample route for train
-  int route_length = sizeof(route) / sizeof(route[0]);
-
-  for (int i = 0; i < route_length; i++) {
-    int segment = route[i];
+  for (int i = 0; i < train->route_length; i++) {
+    int segment = train->route[i];
 
     // Try to lock the track segment
     pthread_mutex_lock(&track_mutex[segment]);
-
     // Mark segment as occupied
     track_segments[segment] = '1';
-    printf("Train %d entered segment %d.\n", train_id, segment);
+    printf("Train %d entered segment %d.\n", train_id, segment + 1);
 
-    // Simulate travel time
+    // Simulate travel time - uncomment if production
     sleep(2);
 
     // Free the segment
     track_segments[segment] = '0';
     pthread_mutex_unlock(&track_mutex[segment]);
-    printf("Train %d left segment %d.\n", train_id, segment);
+    printf("Train %d left segment %d.\n", train_id, segment + 1);
   }
 
   printf("Train %d reached destination.\n", train_id);
-  free(train);
   pthread_exit(NULL);
 }
 
 int main() {
   pthread_t trains[NUM_TRAINS];
+  Train *train_data = (Train *)malloc((sizeof(Train) * NUM_TRAINS));
 
   // Initialize track segments and mutexes
   memset(track_segments, '0', NUM_SEGMENTS);
   for (int i = 0; i < NUM_SEGMENTS; i++) {
-    if (pthread_mutex_init(&track_mutex[i], NULL) == 0) {
+    if (pthread_mutex_init(&track_mutex[i], NULL) != 0) {
       perror("Error while pthread_mutex_init: line 63\n");
       return 1;
     }
   }
+
+  load_routes(train_data);
 
   printf("Controller: Tracks initialized.\n");
 
@@ -72,7 +113,7 @@ int main() {
     Train *train = malloc(sizeof(Train));
     train->train_id = i + 1;
 
-    if (pthread_create(&trains[i], NULL, train_journey, train) != 0) {
+    if (pthread_create(&trains[i], NULL, train_journey, &train_data[i]) != 0) {
       perror("Failed to create train thread");
       return 1;
     }
@@ -89,6 +130,8 @@ int main() {
   for (int i = 0; i < NUM_SEGMENTS; i++) {
     pthread_mutex_destroy(&track_mutex[i]);
   }
+
+  free(train_data);
 
   return 0;
 }
