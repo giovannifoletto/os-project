@@ -1,4 +1,3 @@
-#include "journey.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -93,7 +92,8 @@ void journey_process() {
 
 // Function for TRAIN_THR processes to move along the tracks
 void train_process(int train_id) {
-  printf("[DEBUG] Train %d started its journey with pid: %d\n", train_id, getpid());
+  printf("[DEBUG] Train %d started its journey with pid: %d\n", train_id,
+         getpid());
 
   int msgid = msgget(MSG_KEY, 0666);
   if (msgid == -1) {
@@ -116,7 +116,8 @@ void train_process(int train_id) {
   printf("\n");
 
   for (int i = 0; i < message.num_steps; i++) {
-    printf("[DEBUG] Train %d moving to segment MA%d\n", train_id, message.itinerary[i]);
+    printf("[DEBUG] Train %d moving to segment MA%d\n", train_id,
+           message.itinerary[i]);
     sleep(2); // Simulating time taken to move
   }
 
