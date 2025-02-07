@@ -147,16 +147,8 @@ void train_process(int train_id) {
   int current_segment = -1;
   for (int i = 0; i < message.num_steps; ++i) {
     int next_segment = message.itinerary[i] - 1;
-    while (sem_trywait(track_semaphores[next_segment]) == -1) {
-      printf("Train %d waiting for segment MA%d\n", train_id,
-             message.itinerary[i]);
-      sleep(1);
-    }
-
+    sem_wait(track_semaphores[next_segment]);
     // wait blocking call to block the semaphore
-    // implemented with the sem_trywait: since the specification
-    // required us to wait other 2 second if the segment is not
-    // available
     if (current_segment != -1) {
       // sem_post unlock the semaphore
       sem_post(track_semaphores[current_segment]);
@@ -177,17 +169,22 @@ void train_process(int train_id) {
     sleep(2); // Simulating time taken to move
   }
 
+  // unlock the last segment
+  sem_post(track_semaphores[current_segment]);
+
   // Log entry
   time_t now = time(NULL);
   struct tm *t = localtime(&now);
+
   fprintf(log, "[Current: MA%d], [Next: S%d], %04d-%02d-%02d %02d:%02d:%02d\n",
           current_segment + 1, message.dest, t->tm_year + 1900, t->tm_mon + 1,
           t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec);
 
-  // unlock the last segment
-  sem_post(track_semaphores[current_segment]);
+  fprintf(log, "[Current: S%d], [Next: --], %04d-%02d-%02d %02d:%02d:%02d\n",
+          message.dest, t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
+          t->tm_hour, t->tm_min, t->tm_sec);
 
-  printf("[DEBUG] Train %d reached its destination.\n", train_id);
+  printf("Train %d reached its destination.\n", train_id);
   exit(EXIT_SUCCESS);
 }
 
@@ -242,7 +239,19 @@ int main(int argc, char *argv[]) {
            train_pids[i], statuses[i]);
   }
 
+  for (int i = 0; i < NUM_TRAINS; ++i) {
+    // assert that all semaphores are set on zero after closing all.
+  }
+
+  // TODO:
+  // ===============
+  // missing shared memory handling.
+  // ===============
   // Cleanup shared memory on exit
+  for (int i = 0; i < NUM_SEGMENTS; i++) {
+    sem_close(track_semaphores[i]);
+    // sem_unlink(sem_names[i]);
+  }
   shmdt(track_segments);
   shmctl(shmget(SHM_KEY, NUM_SEGMENTS * sizeof(int), 0666), IPC_RMID, NULL);
 
