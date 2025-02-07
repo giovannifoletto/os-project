@@ -37,8 +37,8 @@ struct msg_buffer {
   int dest;
 };
 
-void load_routes(Train *);
-void journey_process();
+void load_routes(Train *, char *);
+void journey_process(Train *);
 int *init_shared_memory();
 void train_process(int);
 
@@ -77,10 +77,10 @@ void init_semaphores() {
 }
 
 // Function for JOURNEY process to handle itineraries
-void journey_process() {
+void journey_process(Train *train_data) {
   printf("JOURNEY process started. Handling itineraries...\n");
-  Train train_data[NUM_TRAINS];
-  load_routes(train_data);
+  // Train train_data[NUM_TRAINS];
+  // load_routes(train_data);
 
   for (int i = 0; i < NUM_TRAINS; ++i) {
     printf("Train %d: (id: %d, route_len: %d, start: %d, destination: %d)\n", i,
@@ -197,14 +197,10 @@ int main(int argc, char *argv[]) {
     exit(EXIT_FAILURE);
   }
 
-  // Open map file
-  // char map_file[20];
-  // snprintf(map_file, sizeof(map_file) - 1, "%s.txt", argv[1]);
-  // FILE *map = fopen(map_file, "w");
-  // if (map == NULL) {
-  //   perror("Failed opening file");
-  //   exit(EXIT_FAILURE);
-  // }
+  Train train_data[NUM_TRAINS];
+  char filename[20];
+  snprintf(filename, sizeof(filename), "%s.txt", argv[1]);
+  load_routes(train_data, filename);
 
   printf("Starting CONTROLLER process...\n");
 
@@ -215,7 +211,7 @@ int main(int argc, char *argv[]) {
   // Fork JOURNEY process
   pid_t journey_pid = fork();
   if (journey_pid == 0) {
-    journey_process();
+    journey_process(train_data);
     exit(0);
   }
 
@@ -254,8 +250,10 @@ int main(int argc, char *argv[]) {
   return 0;
 }
 
-void load_routes(Train *trains) {
-  FILE *file = fopen("MAP1.txt", "r");
+void load_routes(Train *trains, char *filename) {
+  printf("[DEBUG] Using filename: '%s'\n", filename);
+
+  FILE *file = fopen(filename, "r");
   if (!file) {
     perror("Failed to open file");
     exit(1);
