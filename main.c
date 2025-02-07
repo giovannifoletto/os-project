@@ -135,6 +135,20 @@ void journey_process(Train *train_data) {
 
 // Function for TRAIN_THR processes to move along the tracks
 void train_process(int train_id) {
+  char months[12][10];
+  strcpy(months[0], "January");
+  strcpy(months[1], "February");
+  strcpy(months[2], "March");
+  strcpy(months[3], "April");
+  strcpy(months[4], "May");
+  strcpy(months[5], "June");
+  strcpy(months[6], "July");
+  strcpy(months[7], "August");
+  strcpy(months[8], "September");
+  strcpy(months[9], "October");
+  strcpy(months[10], "November");
+  strcpy(months[11], "December");
+
   if (DEBUG) {
     printf("[DEBUG] Train %d started its journey with pid: %d\n", train_id,
            getpid());
@@ -201,10 +215,10 @@ void train_process(int train_id) {
     time_t now = time(NULL);
     struct tm *t = localtime(&now);
     fprintf(log,
-            "[Current: %s%d], [Next: MA%d], %04d-%02d-%02d %02d:%02d:%02d\n",
+            "[Current: %s%d], [Next: MA%d], %s %02d, %04d %02d:%02d:%02d\n",
             (current_segment == -1) ? "S" : "MA",
             (current_segment == -1) ? message.start : current_segment + 1,
-            next_segment + 1, t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
+            next_segment + 1, months[t->tm_mon], t->tm_mday, t->tm_year + 1900,
             t->tm_hour, t->tm_min, t->tm_sec);
 
     current_segment = next_segment;
@@ -220,12 +234,12 @@ void train_process(int train_id) {
   time_t now = time(NULL);
   struct tm *t = localtime(&now);
 
-  fprintf(log, "[Current: MA%d], [Next: S%d], %04d-%02d-%02d %02d:%02d:%02d\n",
-          current_segment + 1, message.dest, t->tm_year + 1900, t->tm_mon + 1,
-          t->tm_mday, t->tm_hour, t->tm_min, t->tm_sec);
+  fprintf(log, "[Current: MA%d], [Next: S%d], %s %02d, %04d %02d:%02d:%02d\n",
+          current_segment + 1, message.dest, months[t->tm_mon], t->tm_mday,
+          t->tm_year + 1900, t->tm_hour, t->tm_min, t->tm_sec);
 
-  fprintf(log, "[Current: S%d], [Next: --], %04d-%02d-%02d %02d:%02d:%02d\n",
-          message.dest, t->tm_year + 1900, t->tm_mon + 1, t->tm_mday,
+  fprintf(log, "[Current: S%d], [Next: --], %s %02d, %04d %02d:%02d:%02d\n",
+          message.dest, months[t->tm_mon], t->tm_mday, t->tm_year + 1900,
           t->tm_hour, t->tm_min, t->tm_sec);
 
   printf("Train %d reached its destination.\n", train_id);
