@@ -228,6 +228,7 @@ void train_process(int train_id) {
   }
 
   // unlock the last segment
+  ptr[current_segment] = 0;
   sem_post(track_semaphores[current_segment]);
 
   // Log entry
@@ -347,8 +348,8 @@ void load_routes(Train *trains, char *filename) {
 
   FILE *file = fopen(filename, "r");
   if (!file) {
-    perror("Failed to open file");
-    exit(1);
+    perror("load_routes/fopen - Failed to open file");
+    exit(EXIT_FAILURE);
   }
 
   char line[200];
