@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ipc.h>
+#include <sys/mman.h>
 #include <sys/msg.h>
 #include <sys/shm.h>
 #include <sys/types.h>
@@ -15,8 +16,9 @@
 #define NUM_TRAINS 5
 #define MAX_ROUTE 10
 
-#define SHM_KEY 1234 // Shared memory key
 #define MSG_KEY 5678 // Message queue key
+#define SHM_NAME "/my_shared_memory"
+#define SHM_SIZE sizeof(int) * NUM_SEGMENTS
 
 sem_t *track_semaphores[NUM_SEGMENTS];
 
@@ -39,26 +41,40 @@ struct msg_buffer {
 
 void load_routes(Train *, char *);
 void journey_process(Train *);
-int *init_shared_memory();
+int init_shared_memory();
 void train_process(int);
 
 // Function to initialize shared memory
-int *init_shared_memory() {
-  int shmid = shmget(SHM_KEY, NUM_SEGMENTS * sizeof(int), IPC_CREAT | 0666);
-  if (shmid == -1) {
-    perror("shmget failed");
-    exit(1);
+int init_shared_memory() {
+  int shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
+  if (shm_fd == -1) {
+    perror("shm_open");
+    exit(EXIT_FAILURE);
   }
-  int *shm_ptr = (int *)shmat(shmid, NULL, 0);
-  if (shm_ptr == (int *)-1) {
-    perror("shmat failed");
-    exit(1);
+
+  if (ftruncate(shm_fd, SHM_SIZE) == -1) {
+    perror("init_shared_memory/ftruncate");
+    exit(EXIT_FAILURE);
   }
-  // Initialize track segments to 0 (free state)
+
+  // this function will map the object in the process address space
+  int *ptr = (int *)mmap(NULL, SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED,
+                         shm_fd, 0);
+  if (ptr == MAP_FAILED) {
+    perror("init_shared_memory/mmap");
+    exit(EXIT_FAILURE);
+  }
+
   for (int i = 0; i < NUM_SEGMENTS; i++) {
-    shm_ptr[i] = 0;
+    ptr[i] = 0;
   }
-  return shm_ptr;
+
+  if (munmap(ptr, SHM_SIZE) == -1) {
+    perror("init_shared_memory/munmap");
+    exit(EXIT_FAILURE);
+  }
+
+  return shm_fd;
 }
 
 // Function to initialize POSIX semaphores
@@ -135,6 +151,20 @@ void train_process(int train_id) {
   }
   printf("S%d\n", message.dest);
 
+  // get shared pointer
+  int shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
+  if (shm_fd == -1) {
+    perror("shm_open");
+    exit(EXIT_FAILURE);
+  }
+  // this function will map the object in the process address space
+  int *ptr = (int *)mmap(NULL, SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED,
+                         shm_fd, 0);
+  if (ptr == MAP_FAILED) {
+    perror("init_shared_memory/mmap");
+    exit(EXIT_FAILURE);
+  }
+
   // Open log file
   char log_filename[20];
   snprintf(log_filename, sizeof(log_filename), "T%d.log", train_id);
@@ -148,9 +178,11 @@ void train_process(int train_id) {
   for (int i = 0; i < message.num_steps; ++i) {
     int next_segment = message.itinerary[i] - 1;
     sem_wait(track_semaphores[next_segment]);
+    ptr[next_segment] = 1;
     // wait blocking call to block the semaphore
     if (current_segment != -1) {
       // sem_post unlock the semaphore
+      ptr[current_segment] = 0;
       sem_post(track_semaphores[current_segment]);
     }
     // Log entry
@@ -185,6 +217,17 @@ void train_process(int train_id) {
           t->tm_hour, t->tm_min, t->tm_sec);
 
   printf("Train %d reached its destination.\n", train_id);
+
+  if (munmap(ptr, SHM_SIZE) == -1) {
+    perror("train_process/munmap");
+    exit(EXIT_FAILURE);
+  }
+
+  if (close(shm_fd) == -1) {
+    perror("train_process/close");
+    exit(EXIT_FAILURE);
+  }
+
   exit(EXIT_SUCCESS);
 }
 
@@ -201,8 +244,9 @@ int main(int argc, char *argv[]) {
 
   printf("Starting CONTROLLER process...\n");
 
-  // Initialize shared memory
-  int *track_segments = init_shared_memory();
+  // Initialize shared memory and return
+  // the shm filedescriptor
+  int shm_fd = init_shared_memory();
   init_semaphores();
 
   // Fork JOURNEY process
@@ -243,17 +287,19 @@ int main(int argc, char *argv[]) {
     // assert that all semaphores are set on zero after closing all.
   }
 
-  // TODO:
-  // ===============
-  // missing shared memory handling.
-  // ===============
+  if (close(shm_fd) == -1) {
+    perror("close");
+    return 1;
+  }
+
+  if (shm_unlink(SHM_NAME) == -1) {
+    perror("train_process/shm_unlink");
+    return 1;
+  }
   // Cleanup shared memory on exit
   for (int i = 0; i < NUM_SEGMENTS; i++) {
     sem_close(track_semaphores[i]);
-    // sem_unlink(sem_names[i]);
   }
-  shmdt(track_segments);
-  shmctl(shmget(SHM_KEY, NUM_SEGMENTS * sizeof(int), 0666), IPC_RMID, NULL);
 
   printf("Controller exiting, cleaned up shared memory.\n");
   return 0;
