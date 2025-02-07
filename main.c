@@ -269,18 +269,22 @@ int main(int argc, char *argv[]) {
   load_routes(train_data, filename);
 
   if (DEBUG) {
-    printf("Starting CONTROLLER process...\n");
+    printf("[DEBUG] Initialize shared memory and semaphores\n");
   }
-  // Initialize shared memory and return
-  // the shm filedescriptor
+
+  // shm is a file descriptor
   int shm_fd = init_shared_memory();
   init_semaphores();
+
+  if (DEBUG) {
+    printf("Starting CONTROLLER process...\n");
+  }
 
   // Fork JOURNEY process
   pid_t journey_pid = fork();
   if (journey_pid == 0) {
     journey_process(train_data);
-    exit(0);
+    exit(EXIT_SUCCESS);
   }
 
   // Fork TRAIN_THR processes
