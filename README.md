@@ -1,8 +1,8 @@
 ## OS - IPC/Multiprocess Project
 
-TODO:
+[Report](https://docs.google.com/document/d/18B1q-x8rdiYi6uFzP855YDU9qKlKkeYf12xoyYcL_7A/edit?tab=t.0#heading=h.lvf9memeav9k)
 
-- check if all values in shm_fd are set to zero.
+## Notes
 
 SOURCEs:
 [Shared_memory](https://dextutor.com/program-for-ipc-using-shared-memory/)
