@@ -20,6 +20,8 @@
 #define SHM_NAME "/my_shared_memory"
 #define SHM_SIZE sizeof(int) * NUM_SEGMENTS
 
+#define DEBUG 0
+
 sem_t *track_semaphores[NUM_SEGMENTS];
 
 // Train data structure
@@ -94,14 +96,19 @@ void init_semaphores() {
 
 // Function for JOURNEY process to handle itineraries
 void journey_process(Train *train_data) {
-  printf("JOURNEY process started. Handling itineraries...\n");
+  if (DEBUG) {
+    printf("[DEBUG] JOURNEY process started. Handling itineraries...\n");
+  }
   // Train train_data[NUM_TRAINS];
   // load_routes(train_data);
 
-  for (int i = 0; i < NUM_TRAINS; ++i) {
-    printf("Train %d: (id: %d, route_len: %d, start: %d, destination: %d)\n", i,
-           train_data[i].train_id, train_data[i].route_length,
-           train_data[i].start, train_data[i].dest);
+  if (DEBUG) {
+    for (int i = 0; i < NUM_TRAINS; ++i) {
+      printf("[DEBUG] Train %d: (id: %d, route_len: %d, start: %d, "
+             "destination: %d)\n",
+             i, train_data[i].train_id, train_data[i].route_length,
+             train_data[i].start, train_data[i].dest);
+    }
   }
 
   int msgid = msgget(MSG_KEY, IPC_CREAT | 0666);
@@ -128,8 +135,10 @@ void journey_process(Train *train_data) {
 
 // Function for TRAIN_THR processes to move along the tracks
 void train_process(int train_id) {
-  printf("[DEBUG] Train %d started its journey with pid: %d\n", train_id,
-         getpid());
+  if (DEBUG) {
+    printf("[DEBUG] Train %d started its journey with pid: %d\n", train_id,
+           getpid());
+  }
 
   int msgid = msgget(MSG_KEY, 0666);
   if (msgid == -1) {
@@ -145,11 +154,14 @@ void train_process(int train_id) {
   }
 
   // Debug: Print received itinerary
-  printf("[DEBUG] Train %d received itinerary: S%d ", train_id, message.start);
-  for (int i = 0; i < message.num_steps; i++) {
-    printf("MA%d ", message.itinerary[i]);
+  if (DEBUG) {
+    printf("[DEBUG] Train %d received itinerary: S%d ", train_id,
+           message.start);
+    for (int i = 0; i < message.num_steps; i++) {
+      printf("MA%d ", message.itinerary[i]);
+    }
+    printf("S%d\n", message.dest);
   }
-  printf("S%d\n", message.dest);
 
   // get shared pointer
   int shm_fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
@@ -242,8 +254,9 @@ int main(int argc, char *argv[]) {
   snprintf(filename, sizeof(filename), "%s.txt", argv[1]);
   load_routes(train_data, filename);
 
-  printf("Starting CONTROLLER process...\n");
-
+  if (DEBUG) {
+    printf("Starting CONTROLLER process...\n");
+  }
   // Initialize shared memory and return
   // the shm filedescriptor
   int shm_fd = init_shared_memory();
@@ -278,14 +291,16 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  for (int i = 0; i < NUM_TRAINS; i++) {
-    printf("[DEBUG] Process %d wiht pid %d exited with status: %d\n", i,
-           train_pids[i], statuses[i]);
+  if (DEBUG) {
+    for (int i = 0; i < NUM_TRAINS; i++) {
+      printf("[DEBUG] Process %d wiht pid %d exited with status: %d\n", i,
+             train_pids[i], statuses[i]);
+    }
   }
 
-  for (int i = 0; i < NUM_TRAINS; ++i) {
-    // assert that all semaphores are set on zero after closing all.
-  }
+  // for (int i = 0; i < NUM_TRAINS; ++i) {
+  //   // assert that all semaphores are set on zero after closing all.
+  // }
 
   if (close(shm_fd) == -1) {
     perror("close");
@@ -301,12 +316,16 @@ int main(int argc, char *argv[]) {
     sem_close(track_semaphores[i]);
   }
 
-  printf("Controller exiting, cleaned up shared memory.\n");
+  if (DEBUG) {
+    printf("[DEBUG] Controller exiting, cleaned up shared memory.\n");
+  }
   return 0;
 }
 
 void load_routes(Train *trains, char *filename) {
-  printf("[DEBUG] Using filename: '%s'\n", filename);
+  if (DEBUG) {
+    printf("[DEBUG] Using filename: '%s'\n", filename);
+  }
 
   FILE *file = fopen(filename, "r");
   if (!file) {

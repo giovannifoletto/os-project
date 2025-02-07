@@ -10,7 +10,7 @@ CFLAGS = -Wall -g
 TARGET = train_manager
 
 # Source files
-SRCS = main.c train_handler.c
+SRCS = main.c
 
 # Object files
 OBJS = $(SRCS:.c=.o)
